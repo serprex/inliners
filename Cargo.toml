@@ -1,0 +1,17 @@
+[package]
+name = "inliners"
+version = "0.1.0"
+authors = ["serprex"]
+license = "MIT"
+repository = "https://github.com/serprex/inliners"
+description = "Implementation of Inline"
+
+[dependencies]
+fnv = "1.0.5"
+regex = "0.1.80"
+
+[profile.release]
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
