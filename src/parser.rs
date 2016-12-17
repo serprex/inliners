@@ -1,4 +1,5 @@
 use std::io::{self, stdin, Read, BufRead};
+use std::ops::Not;
 use std::mem;
 use std::str::Bytes;
 use fnv::FnvHashMap;
@@ -16,10 +17,8 @@ pub enum Instr {
 	Imm2Reg(u8, u8),
 	Imm2Mem(u8),
 	Str2Mem(Vec<u8>),
-	CmpC(CmpOp, u8, Vec<u8>),
-	CmpR(CmpOp, u8, Vec<u8>),
-	LoopC(CmpOp, u8, u8, Vec<u8>),
-	LoopR(CmpOp, u8, u8, Vec<u8>),
+	Cmp(Cop, u8, Vec<u8>),
+	Loop(Cop, u8, u8, Vec<u8>),
 	PCReg(u8),
 	PNReg(u8),
 	Incr(u8),
@@ -37,14 +36,35 @@ pub enum Instr {
 	Halt,
 }
 
+#[derive(Copy, Clone)]
+enum Cmp {
+	LT, LE, EQ, GE, GT, NE,
+}
+
 #[derive(Copy, Clone, Debug)]
-enum CmpOp {
-	LT,
-	LE,
-	EQ,
-	GE,
-	GT,
-	NE,
+enum Cop {
+	LTC(u8), LEC(u8), EQC(u8), GEC(u8), GTC(u8), NEC(u8),
+	LTR(u8), LER(u8), EQR(u8), GER(u8), GTR(u8), NER(u8),
+}
+
+impl Not for Cop {
+	type Output = Cop;
+	fn not(self) -> self {
+		match self {
+			Cop::LTC(x) => Cop::GEC(x),
+			Cop::LEC(x) => Cop::GTC(x),
+			Cop::EQC(x) => Cop::NEC(x),
+			Cop::GEC(x) => Cop::LTC(x),
+			Cop::GTC(x) => Cop::LEC(x),
+			Cop::NEC(x) => Cop::EQC(x),
+			Cop::LTR(x) => Cop::GER(x),
+			Cop::LER(x) => Cop::GTR(x),
+			Cop::EQR(x) => Cop::NER(x),
+			Cop::GER(x) => Cop::LTR(x),
+			Cop::GTR(x) => Cop::LER(x),
+			Cop::NER(x) => Cop::EQR(x),
+		}
+	}
 }
 
 fn parse_a(s: &[u8]) -> u8 {
@@ -234,6 +254,50 @@ fn parse_lab(chs: &[u8]) -> (&[u8], Vec<u8>) {
 	(&chs[idx+1..], label)
 }
 
+fn parse_cmp(mut chs: &[u8]) -> (&[u8], Cmp) {
+	chs = skipws(chs);
+	match (chs[0], chs[1]) {
+		(b'<', b'=') => (&chs[2..], Cmp::LE),
+		(b'<', _) => (&chs[1..], Cmp::LT),
+		(b'=', _) => (&chs[1..], Cmp::EQ),
+		(b'>', b'=') => (&chs[2..], Cmp::GE),
+		(b'>', _) => (&chs[1..], Cmp::GT),
+		(b'!', _) => (&chs[1..], Cmp::NE),
+		_ => panic!("Expected > | >= | == | <= | < | !"),
+	}
+}
+
+fn parse_cond(chs: &[u8]) -> (&[u8], Cop) {
+	let mut idx = 0;
+	while chs[idx] != b'(' { idx +=1 }
+	idx += 1;
+	while chs[idx] == b' ' || chs[idx] == b'\t' { idx += 1 }
+	let (newchs, mut cop) = parse_cmp(&chs[idx..]);
+	let chs = skipws(newchs);
+	let (newchs, v) = parse_reg(chs);
+	if newchs[0] == b')' {
+		(&newchs[1..], match cop {
+			Cmp::LT => Cop::LTC(v),
+			Cmp::LE => Cop::LEC(v),
+			Cmp::EQ => Cop::EQC(v),
+			Cmp::GT => Cop::GTC(v),
+			Cmp::GE => Cop::GEC(v),
+			Cmp::NE => Cop::NEC(v),
+		})
+	} else if newchs[0] == b':' && newchs[1] == b'r' && newchs[2] == b')' {
+		(&newchs[3..], match cop {
+			Cmp::LT => Cop::LTR(v),
+			Cmp::LE => Cop::LER(v),
+			Cmp::EQ => Cop::EQR(v),
+			Cmp::GT => Cop::GTR(v),
+			Cmp::GE => Cop::GER(v),
+			Cmp::NE => Cop::NER(v),
+		})
+	} else {
+		panic!("Expected ) or :r)")
+	}
+}
+
 #[derive(Debug)]
 pub struct Parser {
 	pub prog: Vec<Instr>,
@@ -255,54 +319,48 @@ macro_rules! relab {
 	() => { r"\{[a-zA-Z0-9_]+\}" }
 }
 macro_rules! recond {
-	() => { concat!(r"\((>|<|>=|<=|!|=)\s*", rereg!(), r"\)") }
-}
-macro_rules! recondreg {
-	() => { concat!(r"\((>|<|>=|<=|!|=)\s*", rereg!(), r":r\)") }
+	() => { concat!(r"\((>|<|>=|<=|!|=)\s*", rereg!(), r"(:r)?\)") }
 }
 
 const RULES: &'static [&'static str] = &[
-	concat!(r"!s?\s*", remem!()),
-	concat!(r"\*s\s*", remem!()),
-	concat!(r"\*\s*", remem!()),
-	concat!(r"\*\s*", rereg!()),
-	concat!(r#""\s*"#, remem!()),
-	concat!(r#""\s*"#, rereg!()),
-	concat!(rereg!(), r"\s*>\s*", remem!()),
-	concat!(rereg!(), r"\s*<\s*", remem!()),
-	concat!(rereg!(), r"\s*<>\s*", remem!()),
-	concat!(r"@\s*", relab!()),
-	concat!(r"#\s*", relab!()),
-	concat!(r"\?\s*", rereg!(), r"\s*", recond!(), r"\s*_\s*", relab!(), r"\s*_\s*\(\s*", relab!(), r"\)"),
-	concat!(r"\?\s*", rereg!(), r"\s*", recondreg!(), r"\s*_\s*", relab!(), r"\s*_\s*\(\s*", relab!(), r"\)"),
-	concat!(r"\?\s*", rereg!(), r"\s*", recond!(), r"\s*_\s*", relab!()),
-	concat!(r"\?\s*", rereg!(), r"\s*", recondreg!(), r"\s*_\s*", relab!()),
-	concat!(r"%\s*", relab!(), r"\s*", recond!(), r"\s*", reconst!()),
-	concat!(r"%\s*", relab!(), r"\s*", recondreg!(), r"\s*", reconst!()),
-	concat!(r"\\s*", rereg!(), r"\s*", reconst!()),
-	concat!(r"\$\s*", remem!(), reconst!()),
-	concat!(r"\$s\s*", remem!(), r"\s*\(.*:a\)"),
-	concat!(r".\s*", rereg!(), r"\s*", rereg!()),
-	concat!(r",\s*", rereg!(), r"\s*", rereg!()),
-	concat!(r"\+\s*", rereg!()),
-	concat!(r"-\s*", rereg!()),
-	concat!(r"\+\+\s*", rereg!(), r"(\s*/\s*", rereg!(), r")+"),
-	concat!(r"--\s*", rereg!(), r"\s*/\s*", rereg!()),
-	concat!(r"\*\*\s*", rereg!(), r"(\s*/\s*", rereg!(), r")+"),
-	concat!(r"\\\s*", rereg!(), r"\s*/\s*", rereg!()),
-	concat!(r"\^\^\s*", rereg!(), r"\s*/\s*", rereg!()),
-	concat!(r"<<\s*", rereg!(), r"\s*/\s*", rereg!()),
-	concat!(r"<<<\s*", rereg!(), r"\s*/\s*", rereg!()),
-	concat!(r">>\s*", rereg!(), r"\s*/\s*", rereg!()),
-	concat!(r">>>\s*", rereg!(), r"\s*/\s*", rereg!()),
-	concat!(r"&\s*", rereg!(), r"(\s*/\s*", rereg!(), r")+"),
-	concat!(r"\|\s*", rereg!(), r"(\s*/\s*", rereg!(), r")+"),
-	concat!(r"\^\s*", rereg!(), r"(\s*/\s*", rereg!(), r")+"),
-	concat!(r"~\s*", relab!()),
-	concat!(r"//"),
-	concat!(r"/"),
-	concat!(r";[^']*"),
-	concat!(r"'.*"),
+	concat!(r"^!s?\s*", remem!()),
+	concat!(r"^\*s\s*", remem!()),
+	concat!(r"^\*\s*", remem!()),
+	concat!(r"^\*\s*", rereg!()),
+	concat!(r#"^"\s*"#, remem!()),
+	concat!(r#"^"\s*"#, rereg!()),
+	concat!("^", rereg!(), r"\s*>\s*", remem!()),
+	concat!("^", rereg!(), r"\s*<\s*", remem!()),
+	concat!("^", rereg!(), r"\s*<>\s*", remem!()),
+	concat!(r"^@\s*", relab!()),
+	concat!(r"^#\s*", relab!()),
+	concat!(r"^\?\s*", rereg!(), r"\s*", recond!(), r"\s*_\s*", relab!(), r"\s*_\s*\(\s*", relab!(), r"\)"),
+	concat!(r"^\?\s*", rereg!(), r"\s*", recond!(), r"\s*_\s*", relab!()),
+	concat!(r"^%\s*", relab!(), r"\s*", recond!(), r"\s*", reconst!()),
+	concat!(r"^\\s*", rereg!(), r"\s*", reconst!()),
+	concat!(r"^\$\s*", remem!(), reconst!()),
+	concat!(r"^\$s\s*", remem!(), r"\s*\(.*:a\)"),
+	concat!(r"^.\s*", rereg!(), r"\s*", rereg!()),
+	concat!(r"^,\s*", rereg!(), r"\s*", rereg!()),
+	concat!(r"^\+\s*", rereg!()),
+	concat!(r"^-\s*", rereg!()),
+	concat!(r"^\+\+\s*", rereg!(), r"(\s*/\s*", rereg!(), r")+"),
+	concat!(r"^--\s*", rereg!(), r"\s*/\s*", rereg!()),
+	concat!(r"^\*\*\s*", rereg!(), r"(\s*/\s*", rereg!(), r")+"),
+	concat!(r"^\\\s*", rereg!(), r"\s*/\s*", rereg!()),
+	concat!(r"^\^\^\s*", rereg!(), r"\s*/\s*", rereg!()),
+	concat!(r"^<<\s*", rereg!(), r"\s*/\s*", rereg!()),
+	concat!(r"^<<<\s*", rereg!(), r"\s*/\s*", rereg!()),
+	concat!(r"^>>\s*", rereg!(), r"\s*/\s*", rereg!()),
+	concat!(r"^>>>\s*", rereg!(), r"\s*/\s*", rereg!()),
+	concat!(r"^&\s*", rereg!(), r"(\s*/\s*", rereg!(), r")+"),
+	concat!(r"^\|\s*", rereg!(), r"(\s*/\s*", rereg!(), r")+"),
+	concat!(r"^\^\s*", rereg!(), r"(\s*/\s*", rereg!(), r")+"),
+	concat!(r"^~\s*", relab!()),
+	concat!(r"^//"),
+	concat!(r"^/"),
+	concat!(r"^;[^']*"),
+	concat!(r"^'.*"),
 ];
 
 impl Default for Parser {
@@ -396,6 +454,7 @@ impl Parser {
 					line = skipws(&line[1..]);
 					let (newline, r) = parse_reg(line);
 					line = skipws(newline);
+					line = skipws(&line[1..]);
 					line = parse_mem(line, self);
 					self.prog.push(Instr::Reg2Mem(r));
 				},
@@ -403,6 +462,7 @@ impl Parser {
 					line = skipws(&line[1..]);
 					let (newline, r) = parse_reg(line);
 					line = skipws(newline);
+					line = skipws(&line[1..]);
 					line = parse_mem(line, self);
 					self.prog.push(Instr::Mem2Reg(r));
 				},
@@ -410,6 +470,7 @@ impl Parser {
 					line = skipws(&line[2..]);
 					let (newline, r) = parse_reg(line);
 					line = skipws(newline);
+					line = skipws(&line[2..]);
 					line = parse_mem(line, self);
 					self.prog.push(Instr::SwapMem(r));
 				},
@@ -426,37 +487,36 @@ impl Parser {
 					line = newline;
 					self.prog.push(Instr::Call(lab));
 				},
-				11 => { // ? reg constcond _ lab
+				11 => { // ? reg cond _ lab _ lab
 					line = skipws(&line[1..]);
 					let (newline, r) = parse_reg(line);
 					line = skipws(newline);
+					let (newline, cond) = parse_cond(line);
+					line = skipws(newline);
+					line = skipws(&line[1..]);
+					let (newline, lab1) = parse_lab(line);
+					line = skipws(newline);
+					line = skipws(&line[1..]);
+					let (newline, lab2) = parse_lab(line);
+					self.prog.push(Instr::Cmp(cond, r, lab1));
+					self.prog.push(Instr::Jmp(lab2));
 				},
-				12 => { // ? reg regcond _ lab
+				12 => { // ? reg cond _ lab
 					line = skipws(&line[1..]);
 					let (newline, r) = parse_reg(line);
 					line = skipws(newline);
-				},
-				13 => { // ? reg constcond _ lab _ (lab)
-					line = skipws(&line[1..]);
-					let (newline, r) = parse_reg(line);
+					let (newline, cond) = parse_cond(line);
 					line = skipws(newline);
-				},
-				14 => { // ? reg regcond _ lab _ (lab)
 					line = skipws(&line[1..]);
-					let (newline, r) = parse_reg(line);
-					line = skipws(newline);
+					let (newline, lab1) = parse_lab(line);
+					self.prog.push(Instr::Cmp(cond, r, lab1));
 				},
-				15 => { // % lab constcond const
+				13 => { // % lab reg cond const
 					line = skipws(&line[1..]);
 					let (newline, lab) = parse_lab(line);
 					line = skipws(newline);
 				},
-				16 => { // % lab regcond const
-					line = skipws(&line[1..]);
-					let (newline, lab) = parse_lab(line);
-					line = skipws(newline);
-				},
-				17 => { // \ reg const
+				14 => { // \ reg const
 					line = skipws(&line[1..]);
 					let (newline, r) = parse_reg(line);
 					line = skipws(newline);
@@ -464,7 +524,7 @@ impl Parser {
 					line = newline;
 					self.prog.push(Instr::Imm2Reg(c, r));
 				},
-				18 => { // $ mem const
+				15 => { // $ mem const
 					line = skipws(&line[1..]);
 					line = parse_mem(line, self);
 					line = skipws(line);
@@ -472,7 +532,7 @@ impl Parser {
 					line = newline;
 					self.prog.push(Instr::Imm2Mem(c));
 				},
-				19 => { // $s mem string
+				16 => { // $s mem string
 					line = skipws(&line[1..]);
 					line = parse_mem(line, self);
 					line = skipws(line);
@@ -480,7 +540,7 @@ impl Parser {
 					line = newline;
 					self.prog.push(Instr::Str2Mem(cs));
 				},
-				20 => { // . reg reg
+				17 => { // . reg reg
 					line = skipws(&line[1..]);
 					let (newline, r1) = parse_reg(line);
 					line = skipws(newline);
@@ -488,7 +548,7 @@ impl Parser {
 					line = newline;
 					self.prog.push(Instr::Reg2Reg(r2, r1));
 				},
-				21 => { // , reg reg
+				18 => { // , reg reg
 					line = skipws(&line[1..]);
 					let (newline, r1) = parse_reg(line);
 					line = skipws(newline);
@@ -496,69 +556,93 @@ impl Parser {
 					line = newline;
 					self.prog.push(Instr::SwapReg(r1, r2));
 				},
-				22 => { // + reg
+				19 => { // + reg
 					line = skipws(&line[1..]);
 					let (newline, r) = parse_reg(line);
 					line = newline;
 					self.prog.push(Instr::Incr(r));
 				},
-				23 => { // - reg
+				20 => { // - reg
 					line = skipws(&line[1..]);
 					let (newline, r) = parse_reg(line);
 					line = newline;
 					self.prog.push(Instr::Decr(r));
 				},
-				24 => { // ++ reg reg..
+				21 => { // ++ reg reg..
 					line = skipws(&line[2..]);
+					let (newline, r) = parse_reg(line);
+					line = skipws(newline);
 				},
-				25 => { // -- reg reg
+				22 => { // -- reg reg
 					line = skipws(&line[2..]);
+					let (newline, r) = parse_reg(line);
+					line = skipws(newline);
 				},
-				26 => { // ** reg reg..
+				23 => { // ** reg reg..
 					line = skipws(&line[2..]);
+					let (newline, r) = parse_reg(line);
+					line = skipws(newline);
 				},
-				27 => { // \ reg reg
+				24 => { // \ reg reg
 					line = skipws(&line[1..]);
+					let (newline, r) = parse_reg(line);
+					line = skipws(newline);
 				},
-				28 => { // ^^ reg reg
+				25 => { // ^^ reg reg
 					line = skipws(&line[2..]);
+					let (newline, r) = parse_reg(line);
+					line = skipws(newline);
 				},
-				29 => { // << reg reg
+				26 => { // << reg reg
 					line = skipws(&line[2..]);
+					let (newline, r) = parse_reg(line);
+					line = skipws(newline);
 				},
-				30 => { // <<< reg reg
+				27 => { // <<< reg reg
 					line = skipws(&line[3..]);
+					let (newline, r) = parse_reg(line);
+					line = skipws(newline);
 				},
-				31 => { // >> reg reg
+				28 => { // >> reg reg
 					line = skipws(&line[2..]);
+					let (newline, r) = parse_reg(line);
+					line = skipws(newline);
 				},
-				32 => { // >>> reg reg
+				29 => { // >>> reg reg
 					line = skipws(&line[3..]);
+					let (newline, r) = parse_reg(line);
+					line = skipws(newline);
 				},
-				33 => { // & reg reg..
+				30 => { // & reg reg..
 					line = skipws(&line[1..]);
+					let (newline, r) = parse_reg(line);
+					line = skipws(newline);
 				},
-				34 => { // | reg reg..
+				31 => { // | reg reg..
 					line = skipws(&line[1..]);
+					let (newline, r) = parse_reg(line);
+					line = skipws(newline);
 				},
-				35 => { // ^ reg reg..
+				32 => { // ^ reg reg..
 					line = skipws(&line[1..]);
+					let (newline, r) = parse_reg(line);
+					line = skipws(newline);
 				},
-				36 => { // ~ lab
+				33 => { // ~ lab
 					line = skipws(&line[1..]);
 					let (newline, lab) = parse_lab(line);
 					line = newline;
 					self.prog.push(Instr::Print(lab));
 				},
-				37 => { // //
+				34 => { // //
 					line = &line[2..];
 					self.prog.push(Instr::Halt);
 				},
-				38 => { // /
+				35 => { // /
 					line = &line[1..];
 					self.prog.push(Instr::Return);
 				},
-				39 => { // ;
+				36 => { // ;
 					line = &line[1..];
 					let mut ls = Vec::new();
 					while !line.is_empty() && line[0] != b'\'' {
@@ -568,7 +652,7 @@ impl Parser {
 					self.labelstr.insert(cur_label.clone(), ls);
 					break
 				},
-				40 => { // '
+				37 => { // '
 					break
 				},
 				_ => unreachable!(),
@@ -696,10 +780,32 @@ impl Parser {
 					}
 					*mptr = 0;
 				},
-				Instr::CmpC(_, _, _) => (),
-				Instr::CmpR(_, _, _) => (),
-				Instr::LoopC(_, _, _, _) => (),
-				Instr::LoopR(_, _, _, _) => (),
+				Instr::Cmp(op, r1, ref lab) => {
+					let r1 = regs[r1 as usize];
+					if match op {
+						Cop::LTC(v) => r1 < v,
+						Cop::LEC(v) => r1 <= v,
+						Cop::EQC(v) => r1 == v,
+						Cop::GEC(v) => r1 >= v,
+						Cop::GTC(v) => r1 > v,
+						Cop::NEC(v) => r1 != v,
+						Cop::LTR(v) => r1 < regs[v as usize],
+						Cop::LER(v) => r1 <= regs[v as usize],
+						Cop::EQR(v) => r1 == regs[v as usize],
+						Cop::GER(v) => r1 >= regs[v as usize],
+						Cop::GTR(v) => r1 > regs[v as usize],
+						Cop::NER(v) => r1 != regs[v as usize],
+					} {
+						if let Some(&loc) = self.labels.get(lab) {
+							pc = loc;
+							continue
+						} else {
+							println!("Undefined label: {:?}", lab);
+						}
+					}
+				},
+				Instr::Loop(_, _, _, _) => {
+				},
 				Instr::EndLine => {
 
 				},
