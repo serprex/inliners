@@ -1,0 +1,18 @@
+Somehow I came across this language on esolang, looked trivial to implement, started on it.. a couple weeks go by
+
+I've taken 3 stabs at parsing. First I started with hand rolled recursive descent, but the structure felt simpler, tried to model it with nom, but I can never get working with nom right
+
+But this language.. it has no scopes. It's a mash up assembler for a RISC architecture designed by someone who has no idea how to make a RISC architecture (exponent instruction.. seriously? I mean sure, we don't all need to be turing tar pits, but there's so much room for usability improvements & you invest in an exponentent instruction??)
+
+Anyways the brainfuck interpreter example is broken, since it's missing 2 suffixes & $[200] needs an immediate. Then I found that the interpreter was having issues running BF interpreting Hello World because it'd hit [ & dirty 3:d & then continue checking it against character codes. Probably would've been better to model the instructions as gotos rather than calls
+
+So now anyways parsing is that I use a big RegexSet to check for what the next instruction is, slowly stepping through. Conditions being able to include a single instruction instead of a label makes the grammar non regular since that means you can use pumping lemma with infinitely nested conditions. So specially handle that by having parse_instr be recursive there
+
+Things I have yet to implement:
+[100:h] is apparently valid, for now one has to do [1-0:h] (ie break up immediate memory addresses into byte components)
+%. Still trying to decipher semantics
+? with single-instruction but with 2 branches
+++ ** & | ^. Need to invest the few minutes to keep scanning for another element. NTS: don't accept a single argument to these instructions
+Compiling down to a bytecode and/or Rust
+
+Fun thing about RegexSet::new, I hit the 'rust doesn't impl anything for [T; N] where N > 32' issue & had to move it to a static const which I then have be an &[&str] rather than &[&str; 40-something]

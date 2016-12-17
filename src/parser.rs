@@ -23,6 +23,18 @@ pub enum Instr {
 	PNReg(u8),
 	Incr(u8),
 	Decr(u8),
+	Add(u8, u8),
+	Sub(u8, u8),
+	Mul(u8, u8),
+	DivMod(u8, u8),
+	Exp(u8, u8),
+	And(u8, u8),
+	Or(u8, u8),
+	Xor(u8, u8),
+	Shl(u8, u8),
+	Shr(u8, u8),
+	Rol(u8, u8),
+	Ror(u8, u8),
 	PCMem,
 	PNMem,
 	PSMem,
@@ -31,7 +43,6 @@ pub enum Instr {
 	Jmp(Vec<u8>),
 	GCMem,
 	GSMem,
-	EndLine,
 	Return,
 	Halt,
 }
@@ -49,7 +60,7 @@ enum Cop {
 
 impl Not for Cop {
 	type Output = Cop;
-	fn not(self) -> self {
+	fn not(self) -> Self {
 		match self {
 			Cop::LTC(x) => Cop::GEC(x),
 			Cop::LEC(x) => Cop::GTC(x),
@@ -68,25 +79,17 @@ impl Not for Cop {
 }
 
 fn parse_a(s: &[u8]) -> u8 {
-	if let Some(&c) = s.iter().next() {
-		if c == b'\\' {
-			if s.len() > 2 {
-				panic!("Too long :a (2)");
-			}
-			match s.iter().cloned().nth(2).unwrap() {
-				c2 @ b'0' ... b'9' => c2 - b'0',
-				b't' => b'\t',
-				b'r' => b'\r',
-				b'n' => b'\n',
-				c2 => c2,
-			}
-		} else if s.len() > 1 {
-			panic!("Too long :a (1)");
-		} else {
-			c
+	let c = s[0];
+	if c == b'\\' {
+		match s[1] {
+			c2 @ b'0' ... b'9' => c2 - b'0',
+			b't' => b'\t',
+			b'r' => b'\r',
+			b'n' => b'\n',
+			c2 => c2,
 		}
 	} else {
-		panic!("Empty :a");
+		c
 	}
 }
 fn parse_h(s: &[u8]) -> u8 {
@@ -200,7 +203,7 @@ fn parse_mem<'a, 'b>(chs: &'a [u8], parser: &'b mut Parser) -> &'a [u8] {
 				let ind = mem::replace(&mut indice, Vec::new());
 				indices.push(ind);
 				idx += 1;
-				let indvals = match chs[idx] {
+				let mut indvals = match chs[idx] {
 					b'a' => indices.iter().map(|x| parse_a(x)).collect::<Vec<u8>>(),
 					b'b' => indices.iter().map(|x| parse_b(x)).collect::<Vec<u8>>(),
 					b'd' => indices.iter().map(|x| parse_d(x)).collect::<Vec<u8>>(),
@@ -226,6 +229,11 @@ fn parse_mem<'a, 'b>(chs: &'a [u8], parser: &'b mut Parser) -> &'a [u8] {
 					}
 					b']' => (),
 					_ => panic!("Expected : or ]"),
+				}
+				if !regref {
+					while !indvals.is_empty() && indvals[0] == 0 {
+						indvals.remove(0);
+					}
 				}
 				for ind in indvals {
 					if regref {
@@ -298,14 +306,6 @@ fn parse_cond(chs: &[u8]) -> (&[u8], Cop) {
 	}
 }
 
-#[derive(Debug)]
-pub struct Parser {
-	pub prog: Vec<Instr>,
-	pub labels: FnvHashMap<Vec<u8>, usize>,
-	pub labelstr: FnvHashMap<Vec<u8>, Vec<u8>>,
-	regset: RegexSet,
-}
-
 macro_rules! rereg {
 	() => { r"(.:a|\\.:a|[01]{8}:b|\d{1,3}:d|[0-9a-fA-F]{1,2}:h)" }
 }
@@ -313,7 +313,7 @@ macro_rules! reconst {
 	() => { concat!(r"\(", rereg!(), r"\)") }
 }
 macro_rules! remem {
-	() => { r"(\[((.|\\.)(-(.|\\.))*:a|[01]{8}(-[01]{8})*:b|\d{1,3}(-\d{1,3})*:d|[0-9a-fA-F]{1,2}(-[0-9a-fA-F])*:h)(:r)?\])" }
+	() => { r"(\[((.|\\.)(-(.|\\.))*:a|[01]{1,8}(-[01]{1,8})*:b|\d{1,3}(-\d{1,3})*:d|[0-9a-fA-F]{1,2}(-[0-9a-fA-F]{1,2})*:h)(:r)?\])" }
 }
 macro_rules! relab {
 	() => { r"\{[a-zA-Z0-9_]+\}" }
@@ -340,7 +340,7 @@ const RULES: &'static [&'static str] = &[
 	concat!(r"^\\s*", rereg!(), r"\s*", reconst!()),
 	concat!(r"^\$\s*", remem!(), reconst!()),
 	concat!(r"^\$s\s*", remem!(), r"\s*\(.*:a\)"),
-	concat!(r"^.\s*", rereg!(), r"\s*", rereg!()),
+	concat!(r"^\.\s*", rereg!(), r"\s*", rereg!()),
 	concat!(r"^,\s*", rereg!(), r"\s*", rereg!()),
 	concat!(r"^\+\s*", rereg!()),
 	concat!(r"^-\s*", rereg!()),
@@ -361,7 +361,16 @@ const RULES: &'static [&'static str] = &[
 	concat!(r"^/"),
 	concat!(r"^;[^']*"),
 	concat!(r"^'.*"),
+	concat!(r"^\?\s*", rereg!(), r"\s*", recond!(), r"\s*_\s*"),
 ];
+
+#[derive(Debug)]
+pub struct Parser {
+	pub prog: Vec<Instr>,
+	pub labels: FnvHashMap<Vec<u8>, usize>,
+	pub labelstr: FnvHashMap<Vec<u8>, Vec<u8>>,
+	regset: RegexSet,
+}
 
 impl Default for Parser {
 	fn default() -> Parser {
@@ -386,9 +395,8 @@ fn skipws(s: &[u8]) -> &[u8] {
 }
 
 impl Parser {
-	pub fn parse_line(&mut self, line: &str) {
+	pub fn parse_line(&mut self, mut line: &[u8]) {
 		if line.is_empty() { return }
-		let mut line = line.as_bytes();
 		let cur_label = if line[0] == b'{' {
 			let mut idx = 0;
 			let mut lab = Vec::new();
@@ -410,12 +418,16 @@ impl Parser {
 		} else {
 			Vec::new()
 		};
-		println!("{:?}", line);
-		while let Some(mid) = {
+		while let Some(newline) = self.parse_instr(line, &cur_label) {
+			line = newline;
+		}
+	}
+
+	fn parse_instr<'a, 'b>(&'b mut self, mut line: &'a [u8], cur_label: &'b [u8]) -> Option<&'a [u8]> {
+		if let Some(mid) = {
 			line = skipws(line);
 			self.regset.matches(line).into_iter().min()
 		} {
-			println!("{}\t{:?}", mid, line);
 			match mid {
 				0 => { // !s mem, s mem
 					let isstr = line[1] == b's';
@@ -451,7 +463,6 @@ impl Parser {
 					self.prog.push(Instr::PNReg(r));
 				},
 				6 => { // reg > mem 
-					line = skipws(&line[1..]);
 					let (newline, r) = parse_reg(line);
 					line = skipws(newline);
 					line = skipws(&line[1..]);
@@ -459,7 +470,6 @@ impl Parser {
 					self.prog.push(Instr::Reg2Mem(r));
 				},
 				7 => { // reg < mem
-					line = skipws(&line[1..]);
 					let (newline, r) = parse_reg(line);
 					line = skipws(newline);
 					line = skipws(&line[1..]);
@@ -467,7 +477,6 @@ impl Parser {
 					self.prog.push(Instr::Mem2Reg(r));
 				},
 				8 => { // reg <> mem
-					line = skipws(&line[2..]);
 					let (newline, r) = parse_reg(line);
 					line = skipws(newline);
 					line = skipws(&line[2..]);
@@ -479,7 +488,6 @@ impl Parser {
 					let (newline, lab) = parse_lab(line);
 					line = newline;
 					self.prog.push(Instr::Jmp(lab));
-					return
 				},
 				10 => { // # lab
 					line = skipws(&line[1..]);
@@ -498,6 +506,7 @@ impl Parser {
 					line = skipws(newline);
 					line = skipws(&line[1..]);
 					let (newline, lab2) = parse_lab(line);
+					line = newline;
 					self.prog.push(Instr::Cmp(cond, r, lab1));
 					self.prog.push(Instr::Jmp(lab2));
 				},
@@ -509,6 +518,7 @@ impl Parser {
 					line = skipws(newline);
 					line = skipws(&line[1..]);
 					let (newline, lab1) = parse_lab(line);
+					line = newline;
 					self.prog.push(Instr::Cmp(cond, r, lab1));
 				},
 				13 => { // % lab reg cond const
@@ -575,8 +585,12 @@ impl Parser {
 				},
 				22 => { // -- reg reg
 					line = skipws(&line[2..]);
-					let (newline, r) = parse_reg(line);
+					let (newline, r1) = parse_reg(line);
 					line = skipws(newline);
+					line = skipws(&newline[1..]);
+					let (newline, r2) = parse_reg(line);
+					line = newline;
+					self.prog.push(Instr::Sub(r2, r1));
 				},
 				23 => { // ** reg reg..
 					line = skipws(&line[2..]);
@@ -585,33 +599,57 @@ impl Parser {
 				},
 				24 => { // \ reg reg
 					line = skipws(&line[1..]);
-					let (newline, r) = parse_reg(line);
+					let (newline, r1) = parse_reg(line);
 					line = skipws(newline);
+					line = skipws(&newline[1..]);
+					let (newline, r2) = parse_reg(line);
+					line = newline;
+					self.prog.push(Instr::DivMod(r2, r1));
 				},
 				25 => { // ^^ reg reg
 					line = skipws(&line[2..]);
-					let (newline, r) = parse_reg(line);
+					let (newline, r1) = parse_reg(line);
 					line = skipws(newline);
+					line = skipws(&newline[1..]);
+					let (newline, r2) = parse_reg(line);
+					line = newline;
+					self.prog.push(Instr::Exp(r2, r1));
 				},
 				26 => { // << reg reg
 					line = skipws(&line[2..]);
-					let (newline, r) = parse_reg(line);
+					let (newline, r1) = parse_reg(line);
 					line = skipws(newline);
+					line = skipws(&newline[1..]);
+					let (newline, r2) = parse_reg(line);
+					line = newline;
+					self.prog.push(Instr::Shl(r2, r1));
 				},
 				27 => { // <<< reg reg
 					line = skipws(&line[3..]);
-					let (newline, r) = parse_reg(line);
+					let (newline, r1) = parse_reg(line);
 					line = skipws(newline);
+					line = skipws(&newline[1..]);
+					let (newline, r2) = parse_reg(line);
+					line = newline;
+					self.prog.push(Instr::Rol(r2, r1));
 				},
 				28 => { // >> reg reg
 					line = skipws(&line[2..]);
-					let (newline, r) = parse_reg(line);
+					let (newline, r1) = parse_reg(line);
 					line = skipws(newline);
+					line = skipws(&newline[1..]);
+					let (newline, r2) = parse_reg(line);
+					line = newline;
+					self.prog.push(Instr::Shr(r2, r1));
 				},
 				29 => { // >>> reg reg
 					line = skipws(&line[3..]);
-					let (newline, r) = parse_reg(line);
+					let (newline, r1) = parse_reg(line);
 					line = skipws(newline);
+					line = skipws(&newline[1..]);
+					let (newline, r2) = parse_reg(line);
+					line = newline;
+					self.prog.push(Instr::Ror(r2, r1));
 				},
 				30 => { // & reg reg..
 					line = skipws(&line[1..]);
@@ -649,33 +687,55 @@ impl Parser {
 						ls.push(line[0]);
 						line = &line[1..];
 					}
-					self.labelstr.insert(cur_label.clone(), ls);
-					break
+					self.labelstr.insert(Vec::from(cur_label), ls);
+					return None
 				},
 				37 => { // '
-					break
+					return None
+				},
+				38 => { // ? reg cond _ instr
+					line = skipws(&line[1..]);
+					let (newline, r) = parse_reg(line);
+					line = skipws(newline);
+					let (newline, cond) = parse_cond(line);
+					line = skipws(newline);
+					line = skipws(&line[1..]);
+					let lab = self.mklab();
+					self.prog.push(Instr::Cmp(!cond, r, lab.clone()));
+					if let Some(newline) = self.parse_instr(line, cur_label) {
+						line = newline;
+						let len = self.prog.len();
+						self.labels.insert(lab, len);
+					} else {
+						panic!("Expected instruction")
+					}
 				},
 				_ => unreachable!(),
 			}
+			Some(line)
+		} else {
+			None
 		}
-		println!("END {:?}", line);
-		if !cur_label.is_empty() {
-			self.prog.push(Instr::EndLine);
-		}
+	}
+
+	fn mklab(&self) -> Vec<u8> {
+		let mut lab = self.prog.len().to_string().into_bytes();
+		lab.push(b'$');
+		lab
 	}
 
 	pub fn run(&self, mem: &mut [u8]) {
 		let mut regs = [0u8; 256];
 		let mut mptr = 0;
-		let mut loopstack = Vec::new();
 		let mut callstack = Vec::new();
-		self.runcore(0, &mut regs, mem, &mut mptr, &mut loopstack, &mut callstack)
+		self.runcore(0, &mut regs, mem, &mut mptr, &mut callstack)
 	}
 
-	fn runcore(&self, mut pc: usize, regs: &mut [u8; 256], mem: &mut [u8], mptr: &mut usize, loopstack: &mut Vec<usize>, callstack: &mut Vec<usize>) {
+	fn runcore(&self, mut pc: usize, regs: &mut [u8; 256], mem: &mut [u8], mptr: &mut usize, callstack: &mut Vec<usize>) {
 		loop {
+			println!("{}\t{:?}\t{:?}\t{}:{}", pc, self.prog[pc], &regs[..6], *mptr, mem[*mptr]);
 			match self.prog[pc] {
-				Instr::Reg2Reg(r1, r2) => regs[r1 as usize] = regs[r2 as usize],
+				Instr::Reg2Reg(r2, r1) => regs[r1 as usize] = regs[r2 as usize],
 				Instr::Reg2Mem(r) => {
 					mem[*mptr] = regs[r as usize];
 					*mptr = 0;
@@ -700,7 +760,7 @@ impl Parser {
 				Instr::SwapReg(r1, r2) => {
 					regs.swap(r1 as usize, r2 as usize);
 				},
-				Instr::Imm2Reg(r, v) => regs[r as usize] = v,
+				Instr::Imm2Reg(v, r) => regs[r as usize] = v,
 				Instr::Imm2Mem(v) => {
 					mem[*mptr] = v;
 					*mptr = 0;
@@ -720,6 +780,29 @@ impl Parser {
 				},
 				Instr::Incr(r) => regs[r as usize] = regs[r as usize].wrapping_add(1),
 				Instr::Decr(r) => regs[r as usize] = regs[r as usize].wrapping_sub(1),
+				Instr::Add(r2, r1) => regs[r1 as usize] = regs[r1 as usize].wrapping_add(regs[r2 as usize]),
+				Instr::Sub(r2, r1) => regs[r1 as usize] = regs[r1 as usize].wrapping_sub(regs[r2 as usize]),
+				Instr::Mul(r2, r1) => regs[r1 as usize] = regs[r1 as usize].wrapping_mul(regs[r2 as usize]),
+				Instr::DivMod(r2, r1) => {
+					let d = regs[r1 as usize] / regs[r2 as usize];
+					let m = regs[r1 as usize] % regs[r2 as usize];
+					regs[r1 as usize] = d;
+					regs[r2 as usize] = m;
+				},
+				Instr::Exp(r2, r1) => {
+					let mut v = 1u8;
+					for _ in 0..regs[r2 as usize] {
+						v = v.wrapping_mul(regs[r1 as usize]);
+					}
+					regs[r1 as usize] = v;
+				},
+				Instr::And(r2, r1) => regs[r1 as usize] &= regs[r2 as usize],
+				Instr::Or(r2, r1) => regs[r1 as usize] |= regs[r2 as usize],
+				Instr::Xor(r2, r1) => regs[r1 as usize] ^= regs[r2 as usize],
+				Instr::Shl(r2, r1) => regs[r1 as usize] = regs[r1 as usize].wrapping_shl(regs[r2 as usize] as u32),
+				Instr::Shr(r2, r1) => regs[r1 as usize] = regs[r1 as usize].wrapping_shr(regs[r2 as usize] as u32),
+				Instr::Rol(r2, r1) => regs[r1 as usize] = regs[r1 as usize].rotate_left(regs[r2 as usize] as u32),
+				Instr::Ror(r2, r1) => regs[r1 as usize] = regs[r1 as usize].rotate_right(regs[r2 as usize] as u32),
 				Instr::PCMem => {
 					print!("{}", mem[*mptr] as char);
 					*mptr = 0;
@@ -805,9 +888,6 @@ impl Parser {
 					}
 				},
 				Instr::Loop(_, _, _, _) => {
-				},
-				Instr::EndLine => {
-
 				},
 				Instr::Return => {
 					if let Some(loc) = callstack.pop() {

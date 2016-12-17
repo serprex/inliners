@@ -1,5 +1,4 @@
 extern crate fnv;
-#[macro_use]
 extern crate regex;
 //mod vm;
 mod parser;
@@ -16,7 +15,7 @@ fn main() {
 			let f = BufReader::new(f);
 			for line in f.lines() {
 				if let Ok(line) = line {
-					parser.parse_line(&line);
+					parser.parse_line(line.as_bytes());
 				}
 			}
 		}
