@@ -520,7 +520,10 @@ impl Parser {
 					line = skipws(newline);
 					line = skipws(&line[1..]);
 					let (newline, lab1) = parse_lab(line);
-					line = newline;
+					line = skipws(newline);
+					if !line.is_empty() && line[0] == b'_' {
+						line = &line[1..];
+					}
 					self.prog.push(Instr::Cmp(cond, r, lab1));
 				},
 				13 => { // % lab reg cond const
@@ -765,9 +768,30 @@ impl Parser {
 					let lab = self.mklab();
 					self.prog.push(Instr::Cmp(!cond, r, lab.clone()));
 					if let Some(newline) = self.parse_instr(line, cur_label) {
-						line = newline;
+						line = skipws(newline);
 						let len = self.prog.len();
 						self.labels.insert(lab, len);
+						if !line.is_empty() && line[0] == b'_' {
+							let lab2 = self.mklab();
+							self.prog.push(Instr::Jmp(lab2.clone()));
+							line = skipws(&line[1..]);
+							if line[0] == b'{' {
+								line = &line[1..];
+								let mut jlab = Vec::new();
+								while line[0] != b'}' {
+									jlab.push(line[0]);
+									line = &line[1..];
+								}
+								self.prog.push(Instr::Jmp(jlab));
+								line = &line[1..];
+							} else if let Some(newline) = self.parse_instr(line, cur_label) {
+								line = newline;
+							} else {
+								panic!("Expected instruction in else branch")
+							}
+							let len = self.prog.len();
+							self.labels.insert(lab2, len);
+						}
 					} else {
 						panic!("Expected instruction")
 					}
