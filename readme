@@ -12,7 +12,6 @@ Things I have yet to implement:
 [100:h] is apparently valid, for now one has to do [1-0:h] (ie break up immediate memory addresses into byte components)
 %. Still trying to decipher semantics
 ? with single-instruction but with 2 branches
-++ ** & | ^. Need to invest the few minutes to keep scanning for another element. NTS: don't accept a single argument to these instructions
 Compiling down to a bytecode and/or Rust
 
 Fun thing about RegexSet::new, I hit the 'rust doesn't impl anything for [T; N] where N > 32' issue & had to move it to a static const which I then have be an &[&str] rather than &[&str; 40-something]

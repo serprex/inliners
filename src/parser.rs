@@ -23,14 +23,14 @@ pub enum Instr {
 	PNReg(u8),
 	Incr(u8),
 	Decr(u8),
-	Add(u8, u8),
+	Add(Vec<u8>),
 	Sub(u8, u8),
-	Mul(u8, u8),
+	Mul(Vec<u8>),
 	DivMod(u8, u8),
 	Exp(u8, u8),
-	And(u8, u8),
-	Or(u8, u8),
-	Xor(u8, u8),
+	And(Vec<u8>),
+	Or(Vec<u8>),
+	Xor(Vec<u8>),
 	Shl(u8, u8),
 	Shr(u8, u8),
 	Rol(u8, u8),
@@ -370,6 +370,7 @@ pub struct Parser {
 	pub labels: FnvHashMap<Vec<u8>, usize>,
 	pub labelstr: FnvHashMap<Vec<u8>, Vec<u8>>,
 	regset: RegexSet,
+	regtest: Regex,
 }
 
 impl Default for Parser {
@@ -379,6 +380,7 @@ impl Default for Parser {
 			labels: FnvHashMap::default(),
 			labelstr: FnvHashMap::default(),
 			regset: RegexSet::new(RULES).unwrap(),
+			regtest: Regex::new(concat!("^", rereg!())).unwrap(),
 		}
 	}
 }
@@ -582,6 +584,18 @@ impl Parser {
 					line = skipws(&line[2..]);
 					let (newline, r) = parse_reg(line);
 					line = skipws(newline);
+					let mut regs = vec![r];
+					while !line.is_empty() && line[0] == b'/' {
+						let templine = skipws(&line[1..]);
+						if self.regtest.is_match(templine) {
+							let (newline, r) = parse_reg(templine);
+							line = skipws(newline);
+							regs.push(r);
+						} else {
+							break
+						}
+					}
+					self.prog.push(Instr::Add(regs));
 				},
 				22 => { // -- reg reg
 					line = skipws(&line[2..]);
@@ -596,6 +610,18 @@ impl Parser {
 					line = skipws(&line[2..]);
 					let (newline, r) = parse_reg(line);
 					line = skipws(newline);
+					let mut regs = vec![r];
+					while !line.is_empty() && line[0] == b'/' {
+						let templine = skipws(&line[1..]);
+						if self.regtest.is_match(templine) {
+							let (newline, r) = parse_reg(templine);
+							line = skipws(newline);
+							regs.push(r);
+						} else {
+							break
+						}
+					}
+					self.prog.push(Instr::Mul(regs));
 				},
 				24 => { // \ reg reg
 					line = skipws(&line[1..]);
@@ -655,16 +681,52 @@ impl Parser {
 					line = skipws(&line[1..]);
 					let (newline, r) = parse_reg(line);
 					line = skipws(newline);
+					let mut regs = vec![r];
+					while !line.is_empty() && line[0] == b'/' {
+						let templine = skipws(&line[1..]);
+						if self.regtest.is_match(templine) {
+							let (newline, r) = parse_reg(templine);
+							line = skipws(newline);
+							regs.push(r);
+						} else {
+							break
+						}
+					}
+					self.prog.push(Instr::And(regs));
 				},
 				31 => { // | reg reg..
 					line = skipws(&line[1..]);
 					let (newline, r) = parse_reg(line);
 					line = skipws(newline);
+					let mut regs = vec![r];
+					while !line.is_empty() && line[0] == b'/' {
+						let templine = skipws(&line[1..]);
+						if self.regtest.is_match(templine) {
+							let (newline, r) = parse_reg(templine);
+							line = skipws(newline);
+							regs.push(r);
+						} else {
+							break
+						}
+					}
+					self.prog.push(Instr::Or(regs));
 				},
 				32 => { // ^ reg reg..
 					line = skipws(&line[1..]);
 					let (newline, r) = parse_reg(line);
 					line = skipws(newline);
+					let mut regs = vec![r];
+					while !line.is_empty() && line[0] == b'/' {
+						let templine = skipws(&line[1..]);
+						if self.regtest.is_match(templine) {
+							let (newline, r) = parse_reg(templine);
+							line = skipws(newline);
+							regs.push(r);
+						} else {
+							break
+						}
+					}
+					self.prog.push(Instr::Xor(regs));
 				},
 				33 => { // ~ lab
 					line = skipws(&line[1..]);
@@ -732,7 +794,7 @@ impl Parser {
 	}
 
 	fn runcore(&self, mut pc: usize, regs: &mut [u8; 256], mem: &mut [u8], mptr: &mut usize, callstack: &mut Vec<usize>) {
-		loop {
+		while pc < self.prog.len() {
 			println!("{}\t{:?}\t{:?}\t{}:{}", pc, self.prog[pc], &regs[..6], *mptr, mem[*mptr]);
 			match self.prog[pc] {
 				Instr::Reg2Reg(r2, r1) => regs[r1 as usize] = regs[r2 as usize],
@@ -773,16 +835,28 @@ impl Parser {
 					*mptr = 0;
 				},
 				Instr::PCReg(r) => {
-					print!("{}", r as char);
+					print!("{}", regs[r as usize] as char);
 				},
 				Instr::PNReg(r) => {
-					print!("{}", r);
+					print!("{}", regs[r as usize]);
 				},
 				Instr::Incr(r) => regs[r as usize] = regs[r as usize].wrapping_add(1),
 				Instr::Decr(r) => regs[r as usize] = regs[r as usize].wrapping_sub(1),
-				Instr::Add(r2, r1) => regs[r1 as usize] = regs[r1 as usize].wrapping_add(regs[r2 as usize]),
+				Instr::Add(ref rs) => {
+					let mut v = 0u8;
+					for r in rs.iter().cloned() {
+						v = v.wrapping_add(regs[r as usize]);
+					}
+					regs[*rs.last().unwrap() as usize] = v;
+				},
 				Instr::Sub(r2, r1) => regs[r1 as usize] = regs[r1 as usize].wrapping_sub(regs[r2 as usize]),
-				Instr::Mul(r2, r1) => regs[r1 as usize] = regs[r1 as usize].wrapping_mul(regs[r2 as usize]),
+				Instr::Mul(ref rs) => {
+					let mut v = 1u8;
+					for r in rs.iter().cloned() {
+						v = v.wrapping_mul(regs[r as usize]);
+					}
+					regs[*rs.last().unwrap() as usize] = v;
+				},
 				Instr::DivMod(r2, r1) => {
 					let d = regs[r1 as usize] / regs[r2 as usize];
 					let m = regs[r1 as usize] % regs[r2 as usize];
@@ -796,9 +870,27 @@ impl Parser {
 					}
 					regs[r1 as usize] = v;
 				},
-				Instr::And(r2, r1) => regs[r1 as usize] &= regs[r2 as usize],
-				Instr::Or(r2, r1) => regs[r1 as usize] |= regs[r2 as usize],
-				Instr::Xor(r2, r1) => regs[r1 as usize] ^= regs[r2 as usize],
+				Instr::And(ref rs) => {
+					let mut v = 255u8;
+					for r in rs.iter().cloned() {
+						v &= regs[r as usize];
+					}
+					regs[*rs.last().unwrap() as usize] = v;
+				},
+				Instr::Or(ref rs) => {
+					let mut v = 0u8;
+					for r in rs.iter().cloned() {
+						v |= regs[r as usize];
+					}
+					regs[*rs.last().unwrap() as usize] = v;
+				},
+				Instr::Xor(ref rs) => {
+					let mut v = 0u8;
+					for r in rs.iter().cloned() {
+						v ^= regs[r as usize];
+					}
+					regs[*rs.last().unwrap() as usize] = v;
+				},
 				Instr::Shl(r2, r1) => regs[r1 as usize] = regs[r1 as usize].wrapping_shl(regs[r2 as usize] as u32),
 				Instr::Shr(r2, r1) => regs[r1 as usize] = regs[r1 as usize].wrapping_shr(regs[r2 as usize] as u32),
 				Instr::Rol(r2, r1) => regs[r1 as usize] = regs[r1 as usize].rotate_left(regs[r2 as usize] as u32),
