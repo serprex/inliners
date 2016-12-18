@@ -19,7 +19,6 @@ fn main() {
 				}
 			}
 		}
-		println!("{:?}", parser);
 		parser.run(&mut [0u8; 65536]);
 		//let mut vm = Vm::default();
 	} else {

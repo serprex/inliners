@@ -1,7 +1,6 @@
-use std::io::{self, stdin, Read, BufRead};
+use std::io::{stdin, Read};
 use std::ops::Not;
 use std::mem;
-use std::str::Bytes;
 use fnv::FnvHashMap;
 use regex::bytes::{RegexSet, Regex};
 
@@ -53,7 +52,7 @@ enum Cmp {
 }
 
 #[derive(Copy, Clone, Debug)]
-enum Cop {
+pub enum Cop {
 	LTC(u8), LEC(u8), EQC(u8), GEC(u8), GTC(u8), NEC(u8),
 	LTR(u8), LER(u8), EQR(u8), GER(u8), GTR(u8), NER(u8),
 }
@@ -280,7 +279,7 @@ fn parse_cond(chs: &[u8]) -> (&[u8], Cop) {
 	while chs[idx] != b'(' { idx +=1 }
 	idx += 1;
 	while chs[idx] == b' ' || chs[idx] == b'\t' { idx += 1 }
-	let (newchs, mut cop) = parse_cmp(&chs[idx..]);
+	let (newchs, cop) = parse_cmp(&chs[idx..]);
 	let chs = skipws(newchs);
 	let (newchs, v) = parse_reg(chs);
 	if newchs[0] == b')' {
@@ -819,7 +818,6 @@ impl Parser {
 
 	fn runcore(&self, mut pc: usize, regs: &mut [u8; 256], mem: &mut [u8], mptr: &mut usize, callstack: &mut Vec<usize>) {
 		while pc < self.prog.len() {
-			println!("{}\t{:?}\t{:?}\t{}:{}", pc, self.prog[pc], &regs[..6], *mptr, mem[*mptr]);
 			match self.prog[pc] {
 				Instr::Reg2Reg(r2, r1) => regs[r1 as usize] = regs[r2 as usize],
 				Instr::Reg2Mem(r) => {

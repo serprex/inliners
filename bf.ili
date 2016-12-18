@@ -1,0 +1,61 @@
+'0-1  codeptr
+'2-3  memptr
+'4    stackptr
+'5    instruction scratch
+'6    loop scratch
+'0-ff loop start locations
+'Fill code into 100, place tape after 0 byte after code
+\0:h(1:h)
+\2:h(1:h)
+!s[1-0:h]
+{scanmemstart}
+5:h<[2-3:h:r]
+?5:h(=0:h)_{markstart}
++3:h?3h(=0:h)_+2:h
+@{scanmemstart}
+{markstart}+3h?3:h(=0:h)+2:h
+@{read}
+{next}+1:h?1:h(=0:h)_+0:h
+{read}5:h<[0-1:h:r]
+?5:h(=>:a)_{addp}
+?5:h(=<:a)_{subp}
+?5:h(=+:a)_{addc}
+?5:h(=-:a)_{subc}
+?5:h(=]:a)_{looptail}
+?5:h(=[:a)_{loophead}
+?5:h(=.:a)_{pc}
+?5:h(=,:a)_{gc}
+?5:h(!0:h)_{next}_//
+{addp}+3:h?3:h(=0:h)_+2:h@{next}
+{subp}-3:h?3:h(=ff:h)_-3:h@{next}
+{addc}5:h<[2-3:h:r]+5:h5:h>[2-3:h:r]@{next}
+{subc}5:h<[2-3:h:r]-5:h5:h>[2-3:h:r]@{next}
+{pc}*[2-3:h:r]@{next}
+{gc}![2-3:h:r]@{next}
+{loophead}
+5:h<[2-3:h:r]
+?5:h(=0:h)_{skippasttail}
+0:h>[4:h:r]
++4:h
+1:h>[4:h:r]
++4:h
+@{next}
+{looptail}
+5:h<[2-3:h:r]
+?5:h(=0:h)_{skipfromtail}
+-4:h
+1:h<[4:h:r]
+-4:h
+0:h<[4:h:r]
++4:h+4:h
+@{next}
+{skipfromtail}
+-4:h
+@{next}
+{skippasttail}
+\6:h(1:h)
+{skippasttailoop}
++1:h?1:h(=0:h)_+0:h
+5:h<[0-1:h:r]
+?5:h(=]:a)_-6:h_?5:h(=[:a)_+6:h
+?6:h(=0:h)_{next}_{skippasttailloop}
