@@ -17,7 +17,7 @@ pub enum Instr {
 	Imm2Mem(u8),
 	Str2Mem(Vec<u8>),
 	Cmp(Cop, u8, Vec<u8>),
-	Loop(Cop, u8, u8, Vec<u8>),
+	// Loop(Cop, u8, u8, Vec<u8>),
 	PCReg(u8),
 	PNReg(u8),
 	Incr(u8),
@@ -601,7 +601,7 @@ impl Parser {
 				13 => {
 					// % lab reg cond const
 					line = skipws(&line[1..]);
-					let (newline, lab) = parse_lab(line);
+					let (newline, _lab) = parse_lab(line);
 					line = skipws(newline);
 				}
 				14 => {
@@ -685,7 +685,6 @@ impl Parser {
 					// -- reg reg
 					line = skipws(&line[2..]);
 					let (newline, r1) = parse_reg(line);
-					line = skipws(newline);
 					line = skipws(&newline[1..]);
 					let (newline, r2) = parse_reg(line);
 					line = newline;
@@ -713,7 +712,6 @@ impl Parser {
 					// \ reg reg
 					line = skipws(&line[1..]);
 					let (newline, r1) = parse_reg(line);
-					line = skipws(newline);
 					line = skipws(&newline[1..]);
 					let (newline, r2) = parse_reg(line);
 					line = newline;
@@ -723,7 +721,6 @@ impl Parser {
 					// ^^ reg reg
 					line = skipws(&line[2..]);
 					let (newline, r1) = parse_reg(line);
-					line = skipws(newline);
 					line = skipws(&newline[1..]);
 					let (newline, r2) = parse_reg(line);
 					line = newline;
@@ -733,7 +730,6 @@ impl Parser {
 					// << reg reg
 					line = skipws(&line[2..]);
 					let (newline, r1) = parse_reg(line);
-					line = skipws(newline);
 					line = skipws(&newline[1..]);
 					let (newline, r2) = parse_reg(line);
 					line = newline;
@@ -743,7 +739,6 @@ impl Parser {
 					// <<< reg reg
 					line = skipws(&line[3..]);
 					let (newline, r1) = parse_reg(line);
-					line = skipws(newline);
 					line = skipws(&newline[1..]);
 					let (newline, r2) = parse_reg(line);
 					line = newline;
@@ -753,7 +748,6 @@ impl Parser {
 					// >> reg reg
 					line = skipws(&line[2..]);
 					let (newline, r1) = parse_reg(line);
-					line = skipws(newline);
 					line = skipws(&newline[1..]);
 					let (newline, r2) = parse_reg(line);
 					line = newline;
@@ -763,7 +757,6 @@ impl Parser {
 					// >>> reg reg
 					line = skipws(&line[3..]);
 					let (newline, r1) = parse_reg(line);
-					line = skipws(newline);
 					line = skipws(&newline[1..]);
 					let (newline, r2) = parse_reg(line);
 					line = newline;
@@ -1117,7 +1110,7 @@ impl Parser {
 						}
 					}
 				}
-				Instr::Loop(_, _, _, _) => {}
+				// Instr::Loop(_, _, _, _) => {}
 				Instr::Return => {
 					if let Some(loc) = callstack.pop() {
 						pc = loc;
