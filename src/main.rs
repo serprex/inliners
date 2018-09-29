@@ -1,12 +1,10 @@
 extern crate fnv;
 extern crate regex;
-//mod vm;
 mod parser;
+use parser::*;
 use std::env;
 use std::fs;
-use std::io::{BufReader, BufRead};
-use parser::*;
-//use vm::Vm;
+use std::io::{BufRead, BufReader};
 
 fn main() {
 	if let Some(a) = env::args().nth(1) {
@@ -20,7 +18,6 @@ fn main() {
 			}
 		}
 		parser.run(&mut [0u8; 65536]);
-		//let mut vm = Vm::default();
 	} else {
 		println!("inliners [filename]");
 	}
